@@ -1,0 +1,31 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# Output of the go build command
+*.out
+
+# Go workspace files
+bin/
+pkg/
+
+# IDE/editor stuff
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Dependency directories (if using vendoring)
+vendor/
+
+# Logs
+*.log
+
+# Mac system files
+.DS_Store
+
+.env
