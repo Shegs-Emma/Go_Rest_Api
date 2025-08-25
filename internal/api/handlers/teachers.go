@@ -12,38 +12,42 @@ import (
 
 var (
 	teachers = make(map[int]models.Teacher)
-	mutex = &sync.Mutex{}
+	// You can change name of the variable to rwMutex
+	mutex  = &sync.RWMutex{} // We should use different locks
 	nextID = 1
 )
 
+// It is better to provide teachers from main file
 func init() {
 	teachers[nextID] = models.Teacher{
-		ID: nextID,
+		ID:        nextID,
 		FirstName: "John",
-		LastName: "Doe",
-		Class: "9A",
-		Subject: "Math",
+		LastName:  "Doe",
+		Class:     "9A",
+		Subject:   "Math",
 	}
 	nextID++
 	teachers[nextID] = models.Teacher{
-		ID: nextID,
+		ID:        nextID,
 		FirstName: "Jane",
-		LastName: "Smith",
-		Class: "10A",
-		Subject: "Algebra",
+		LastName:  "Smith",
+		Class:     "10A",
+		Subject:   "Algebra",
 	}
 	nextID++
 	teachers[nextID] = models.Teacher{
-		ID: nextID,
+		ID:        nextID,
 		FirstName: "Jane",
-		LastName: "Doe",
-		Class: "11A",
-		Subject: "Biology",
+		LastName:  "Doe",
+		Class:     "11A",
+		Subject:   "Biology",
 	}
 	nextID++
 }
 
 func getTeachersHandler(w http.ResponseWriter, r *http.Request) {
+	mutex.RLock() // Use RLock to allow reading and restrict writing operations
+	defer mutex.RUnlock()
 
 	path := strings.TrimPrefix(r.URL.Path, "/teachers/")
 	idStr := strings.TrimSuffix(path, "/")
@@ -59,21 +63,22 @@ func getTeachersHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		response := struct{
-			Status string `json:"status"`
-			Count int `json:"count"`
-			Data []models.Teacher `json:"data"`
+		response := struct {
+			Status string           `json:"status"`
+			Count  int              `json:"count"`
+			Data   []models.Teacher `json:"data"`
 		}{
 			Status: "success",
-			Count: len(teacherList),
-			Data: teacherList,
+			Count:  len(teacherList),
+			Data:   teacherList,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
+		return // This is very essential
 	}
 	// Handle Path parameter
-	id, err := strconv.Atoi(idStr) 
+	id, err := strconv.Atoi(idStr) // You will get error, bcs your code can get empty string
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -88,6 +93,8 @@ func getTeachersHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(teacher)
 }
 
+// Also this handler does not add teacher, but teachers. Better to change the logic or create another endpoint
+// And make more validations, for example check empty FirstName, LastName and etc.
 func addTeacherHandler(w http.ResponseWriter, r *http.Request) {
 	mutex.Lock()
 	defer mutex.Unlock()
@@ -111,20 +118,20 @@ func addTeacherHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	response := struct {
-		Status string `json:"status"`
-		Count int `json:"count"`
-		Data []models.Teacher `json:"data"`
-	} {
+		Status string           `json:"status"`
+		Count  int              `json:"count"`
+		Data   []models.Teacher `json:"data"`
+	}{
 		Status: "success",
-		Count: len(addedTeachers),
-		Data: addedTeachers,
+		Count:  len(addedTeachers),
+		Data:   addedTeachers,
 	}
 
 	json.NewEncoder(w).Encode(response)
 }
 
 func TeacherHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method{
+	switch r.Method {
 	case http.MethodGet:
 		getTeachersHandler(w, r)
 	case http.MethodPost:
