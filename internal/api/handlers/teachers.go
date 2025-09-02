@@ -3,75 +3,39 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"restapi/internal/models"
+	"restapi/internal/repository/sqlconnect"
 	"strconv"
-	"strings"
-	"sync"
 )
 
-var (
-	teachers = make(map[int]models.Teacher)
-	mutex = &sync.Mutex{}
-	nextID = 1
-)
+func GetTeachersHandler(w http.ResponseWriter, r *http.Request) {
+	var teachers []models.Teacher
+	teachers, err := sqlconnect.GetTeachersDBHandler(teachers, r)
+	if err != nil {
+		return
+	}
 
-func init() {
-	teachers[nextID] = models.Teacher{
-		ID: nextID,
-		FirstName: "John",
-		LastName: "Doe",
-		Class: "9A",
-		Subject: "Math",
+	response := struct{
+		Status string `json:"status"`
+		Count int `json:"count"`
+		Data []models.Teacher `json:"data"`
+	}{
+		Status: "success",
+		Count: len(teachers),
+		Data: teachers,
 	}
-	nextID++
-	teachers[nextID] = models.Teacher{
-		ID: nextID,
-		FirstName: "Jane",
-		LastName: "Smith",
-		Class: "10A",
-		Subject: "Algebra",
-	}
-	nextID++
-	teachers[nextID] = models.Teacher{
-		ID: nextID,
-		FirstName: "Jane",
-		LastName: "Doe",
-		Class: "11A",
-		Subject: "Biology",
-	}
-	nextID++
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+	
 }
 
-func getTeachersHandler(w http.ResponseWriter, r *http.Request) {
+func GetTeacherHandler(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
 
-	path := strings.TrimPrefix(r.URL.Path, "/teachers/")
-	idStr := strings.TrimSuffix(path, "/")
-
-	if idStr == "" {
-		firstName := r.URL.Query().Get("first_name")
-		lastName := r.URL.Query().Get("last_name")
-
-		teacherList := make([]models.Teacher, 0, len(teachers))
-		for _, teacher := range teachers {
-			if (firstName == "" || teacher.FirstName == firstName) && (lastName == "" || teacher.LastName == lastName) {
-				teacherList = append(teacherList, teacher)
-			}
-		}
-
-		response := struct{
-			Status string `json:"status"`
-			Count int `json:"count"`
-			Data []models.Teacher `json:"data"`
-		}{
-			Status: "success",
-			Count: len(teacherList),
-			Data: teacherList,
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-	}
 	// Handle Path parameter
 	id, err := strconv.Atoi(idStr) 
 	if err != nil {
@@ -79,33 +43,68 @@ func getTeachersHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	teacher, exists := teachers[id]
-	if !exists {
-		http.Error(w, "Teacher not found", http.StatusNotFound)
+	teacher, err := sqlconnect.GetTeacherByID(id)
+	if err != nil {
+		fmt.Println(err)
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(teacher)
 }
 
-func addTeacherHandler(w http.ResponseWriter, r *http.Request) {
-	mutex.Lock()
-	defer mutex.Unlock()
-
+func AddTeacherHandler(w http.ResponseWriter, r *http.Request) {
 	var newTeachers []models.Teacher
-	err := json.NewDecoder(r.Body).Decode(&newTeachers)
+	var rawTeachers []map[string]interface{}
 
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Error reading request body", http.StatusInternalServerError)
+		return
+	}
+	defer r.Body.Close()
+
+	err = json.Unmarshal(body, &rawTeachers)
 	if err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	addedTeachers := make([]models.Teacher, len(newTeachers))
-	for i, newTeacher := range newTeachers {
-		newTeacher.ID = nextID
-		teachers[nextID] = newTeacher
-		addedTeachers[i] = newTeacher
-		nextID++
+	fields := GetFieldNames(models.Teacher{})
+
+	allowedFields := make(map[string]struct{})
+	for _, field := range fields {
+		allowedFields[field] = struct{}{}
+	}
+
+	for _, teacher := range rawTeachers {
+		for key := range teacher {
+			_, ok := allowedFields[key]
+			if !ok {
+				http.Error(w, "Unacceptable field found in request, Only use allowed fields.", http.StatusBadRequest)
+				return
+			}
+		}
+	}
+
+	err = json.Unmarshal(body, &newTeachers)
+	if err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	for _, teacher := range newTeachers {
+		err := CheckBlankFields(teacher)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	addedTeachers, err := sqlconnect.AddTeachersDBHandler(newTeachers)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -123,17 +122,129 @@ func addTeacherHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func TeacherHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method{
-	case http.MethodGet:
-		getTeachersHandler(w, r)
-	case http.MethodPost:
-		addTeacherHandler(w, r)
-	case http.MethodPut:
-		w.Write([]byte("Hello Put Method on Teachers Route"))
-	case http.MethodPatch:
-		w.Write([]byte("Hello Patch Method on Teachers Route"))
-	case http.MethodDelete:
-		w.Write([]byte("Hello Delete Method on Teachers Route"))
+func UpdateTeacherHandler(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.Atoi(idStr)
+
+	if err != nil {
+		log.Println(err)
+		http.Error(w, "Invalid Teacher Id", http.StatusBadRequest)
+		return
 	}
+
+	var updatedTeacher models.Teacher
+	err = json.NewDecoder(r.Body).Decode(&updatedTeacher)
+	if err != nil {
+		log.Println(err)
+		http.Error(w, "Invalid Request Payload", http.StatusBadRequest)
+		return
+	}
+
+	updatedTeacherFromDB, err := sqlconnect.UpdateTeacher(id, updatedTeacher)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(updatedTeacherFromDB)
+
+}
+
+func PatchTeacherHandler(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.Atoi(idStr)
+
+	if err != nil {
+		log.Println(err)
+		http.Error(w, "Invalid Teacher Id", http.StatusBadRequest)
+		return
+	}
+
+	var updates map[string]interface{}
+	err = json.NewDecoder(r.Body).Decode(&updates)
+	if err != nil {
+		log.Println(err)
+		http.Error(w, "Invalid Request Payload", http.StatusBadRequest)
+		return
+	}
+
+	updatedTeacherFromDB, err := sqlconnect.PatchTeacher(id, updates)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(updatedTeacherFromDB)
+}
+
+func PatchTeachersHandler(w http.ResponseWriter, r *http.Request) {
+	var updates []map[string]interface{}
+	err := json.NewDecoder(r.Body).Decode(&updates)
+	if err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	err = sqlconnect.PatchTeachers(updates)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func DeleteTeacherHandler(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.Atoi(idStr)
+
+	if err != nil {
+		log.Println(err)
+		http.Error(w, "Invalid Teacher Id", http.StatusBadRequest)
+		return
+	}
+
+	err = sqlconnect.DeleteOneTeacher(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// w.WriteHeader(http.StatusNoContent)
+	w.Header().Set("Content-Type", "application/json")
+	response := struct {
+		Status string `json:"status"`
+		ID int `json:"id"`
+	} {
+		Status: "Teacher Successfully deleted",
+		ID: id,
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
+func DeleteTeachersHandler(w http.ResponseWriter, r *http.Request) {
+	var ids []int
+	err := json.NewDecoder(r.Body).Decode(&ids)
+	if err != nil {
+		log.Println(err)
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	deletedIds, err := sqlconnect.DeleteTeachers(ids)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	response := struct {
+		Status string `json:"status"`
+		DeletedIds []int `json:"deleted_ids"`
+	} {
+		Status: "Teachers Successfully deleted",
+		DeletedIds: deletedIds,
+	}
+	json.NewEncoder(w).Encode(response)
 }
