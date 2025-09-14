@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"restapi/internal/models"
 	"restapi/internal/repository/sqlconnect"
+	"restapi/pkg/utils"
 	"strconv"
 )
 
@@ -246,5 +247,57 @@ func DeleteTeachersHandler(w http.ResponseWriter, r *http.Request) {
 		Status: "Teachers Successfully deleted",
 		DeletedIds: deletedIds,
 	}
+	json.NewEncoder(w).Encode(response)
+}
+
+func GetStudentsByTeacherId (w http.ResponseWriter, r *http.Request) {
+	teacherId := r.PathValue("id")
+
+	var students []models.Student
+
+	students, err := sqlconnect.GetStudentsByTeacherIdFomDB(teacherId, students)
+	if err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	response := struct {
+		Status string `json:"status"`
+		Count int `json:"count"`
+		Data []models.Student `json:"data"`
+	} {
+		Status: "success",
+		Count: len(students),
+		Data: students,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func GetStudentCountByTeacherId(w http.ResponseWriter, r *http.Request) {
+	// admin, manager, exec
+	_, err := utils.AuthorizeUser(r.Context().Value(utils.ContextKey("role")).(string), "admin", "manager", "exec")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	teacherId := r.PathValue("id")
+
+	var studentCount int
+
+	studentCount, err = sqlconnect.GetStudentCountByTeacherIdFromDB(teacherId)
+	if err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	response := struct {
+		Status string `json:"status"`
+		Count int `json:"count"`
+	} {
+		Status: "success",
+		Count: studentCount,
+	}
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
