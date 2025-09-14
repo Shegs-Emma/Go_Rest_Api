@@ -4,35 +4,73 @@ package main
 
 import (
 	"crypto/tls"
+	"embed"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	mw "restapi/internal/api/middlewares"
 	"restapi/internal/api/router"
-	"restapi/internal/repository/sqlconnect"
 	"restapi/pkg/utils"
 	"time"
 
 	"github.com/joho/godotenv"
 )
 
+//go:embed .env
+var envFile embed.FS
+
+func loadEnvFromEmbeddedFile() {
+	// read the embedded.env file
+	content, err := envFile.ReadFile(".env")
+	if err != nil {
+		log.Fatalf("Error reading .env file: %v", err)
+	} 
+
+	// create a temp file to load the env vars
+	tempFile, err := os.CreateTemp("", ".env")
+	if err != nil {
+		log.Fatalf("Error creating temp .env file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+
+	// Write content of embedded .env file to the time file
+	_, err = tempFile.Write(content)
+	if err != nil {
+		log.Fatalf("Error writing .env file: %v", err)
+	} 
+
+	err = tempFile.Close()
+	if err != nil {
+		log.Fatalf("Error closing .env file: %v", err)
+	} 
+
+	// Load the env vars from the temp file
+	err = godotenv.Load(tempFile.Name())
+	if err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
+	}
+}
+
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		return
-	}
+	// Only in production, for running source code
+	// err := godotenv.Load()
+	// if err != nil {
+	// 	return
+	// }
 	
-	_, err = sqlconnect.ConnectDb()
-	if err != nil {
-		utils.ErrorHandler(err, "")
-		return
-	}
+	// Load env vars from the embedded .env file
+	loadEnvFromEmbeddedFile()
+
+	fmt.Println("Env Var CERT_FILE:", os.Getenv("CERT_FILE"))
+
 	port := os.Getenv("API_PORT")
 
-	cert := "cert.pem"
-	key := "key.pem"
+	// cert := "cert.pem"
+	// key := "key.pem"
+	cert := os.Getenv("CERT_FILE")
+	key := os.Getenv("KEY_FILE")
 
 	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS12,
@@ -62,7 +100,7 @@ func main() {
 	}
 
 	fmt.Println("Server is running on port: ", port)
-	err = server.ListenAndServeTLS(cert, key)
+	err := server.ListenAndServeTLS(cert, key)
 	if err != nil {
 		log.Fatalln("Error starting the server", err)
 	}
