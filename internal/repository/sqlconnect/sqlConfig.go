@@ -9,9 +9,6 @@ import (
 )
 
 func ConnectDb() (*sql.DB, error ){
-	fmt.Println("Trying to Connect to mariadb...")
-	
-
 	user := os.Getenv("DB_USER")
 	password := os.Getenv("DB_PASSWORD")
 	dbname := os.Getenv("DB_NAME")
